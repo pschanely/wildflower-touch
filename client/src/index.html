@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="msapplication-tap-highlight" content="no" />
+    <!-- WARNING: for iOS 7, remove the width=device-width and height=device-height attributes. See https://issues.apache.org/jira/browse/CB-4323 -->
+    <meta name="viewport" content="user-scalable=no, initial-scale=1, maximum-scale=1, minimum-scale=1, width=device-width, height=device-height, target-densitydpi=device-dpi" />
+
+    <script type="text/javascript" src="cordova.js"></script>
+    <style>
+     div {
+       display: inline-block;
+     }
+     .module {
+       border: solid 1px red;
+     }
+     .modulename {
+       display: block;
+     }
+     .function {
+       border-left: solid 1px black;
+       border-right: solid 1px black;
+       border-radius: 3px;
+     }
+     .assert {
+       border: solid 1px blue;
+     }
+     .functitle {
+       display: block;
+     }
+     .region {
+       border: solid 1px green;
+       position: relative;
+     }
+     .regionbottom {
+       border-style: solid;
+       border-width: 1px 0px 0px 0px;
+       border-color: black;
+       height: 4px;
+       width: 100%;
+       vertical-align: bottom;
+     }
+     .area {
+       margin: 1px 1px 4px 1px;
+       vertical-align: bottom;
+     }
+     .outlined {
+       border-style: solid;
+       border-width: 0px 0px 1px 0px;
+       border-color: black;
+       margin: 1px 1px 3px 1px;
+     }
+     .cursor {
+       background-color: #fff;
+     }
+     .backgrounded {
+       background-color: #ddd;
+     }
+     .varref {
+       display: inline-block;
+       width: 4px;
+       height: 4px;
+       border: solid 1px black;
+     }
+     .editor {
+       display: block;
+       position: absolute;
+       padding: 0.1em;
+     }
+     .testresults {
+       display: block;
+       position: absolute;
+       padding: 0.1em 0.1em 0.1em 0.1em;
+     }
+     @media (orientation: portrait) {
+       .editor {
+	 top: 0;
+	 left: 0;
+	 width: 100%;
+	 height: 45%;
+       }
+       .testresults {
+	 top: 45%;
+	 left: 0;
+	 width: 100%;
+	 height: 25%;
+       }
+     }
+     @media (orientation: landscape) {
+       .editor {
+	 top: 0;
+	 left: 40%;
+	 width: 60%;
+	 height: 70%;
+       }
+       .testresults {
+	 top: 0;
+	 left: 0;
+	 width: 40%;
+	 height: 70%;
+       }
+     }
+     .error {
+       display: block;
+       background-color: red;
+     }
+     html,body {
+       font-family: Arial, Helvetica, sans-serif;
+       margin:0; padding:0; overflow:hidden;
+     }
+     svg { position:fixed; top:0; bottom:0; left:0; right:0 }
+    </style>
+  </head>
+
+  <body>
+    <div id="svgcontainer">
+    </div>
+    <dialog id="openModuleDialog">
+      <input id="openModuleDialogSearch" placeholder="search" />
+      <ul id="openModuleDialogResults">
+      </ul>
+      <button id="openModuleDialogCancel">cancel</button>
+    </dialog>
+    <dialog id="editNativeDialog">
+      <input id="editNativeDialogCode" placeholder="{&quot;&lt;platform id&gt;&quot;: {&lt;code&gt;}}" style="width: 95%" length="120" />
+      <button id="editNativeDialogSave">ok</button>
+      <button id="editNativeDialogCancel">cancel</button>
+    </dialog>
+    <dialog id="mainMenu">
+      <ul>
+	<li><button id="mainMenuNew">new</button></li>
+	<li><button id="mainMenuOpen">open</button></li>
+	<li><button id="mainMenuSearch">search</button></li>
+	<li><button id="mainMenuExtend">extend</button></li>
+	<li><button id="mainMenuInclude">include</button></li>
+	<li><button id="mainMenuSave">save</button></li>
+	<li><button id="mainMenuDelete">delete</button></li>
+	<li><button id="mainMenuRename">rename</button></li>
+	<li><button id="mainMenuPublish">publish</button></li>
+	<li><button id="mainMenuClose">close</button></li>
+	<li><button id="mainMenuNext">next</button></li>
+	<li><button id="mainMenuNewFunction">new function</button></li>
+	<li><button id="mainMenuCancel">cancel</button></li>
+      </ul>
+    </dialog>
+    <dialog id="interfaceDialog">
+      <ul>
+	<li><input id="interfaceDialogName" placeholder="function name" /></li>
+	<li><input id="interfaceDialogNumInputs" placeholder="number of inputs" /></li>
+	<li><input id="interfaceDialogNumOutputs" placeholder="number of outputs" /></li>
+      </ul>
+      <button id="interfaceDialogSaveButton">done</button>
+    </dialog>
+    <dialog id="callLambdaDialog">
+      <ul>
+	<li><input id="callLambdaDialogNumInputs" placeholder="number of inputs" /></li>
+	<li><input id="callLambdaDialogNumOutputs" placeholder="number of outputs" /></li>
+      </ul>
+      <button id="callLambdaDialogDoneButton">done</button>
+    </dialog>
+    <script type="text/javascript" src="main.js"></script>
+  </body>
+
+</html>
