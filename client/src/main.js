@@ -119,8 +119,140 @@ function svgText(group, x, y, text, ptSize, rot) {
     return textElem;
 }
 
+function linkableFittedText(group, data, bbox, cb) {
+    var group = fittedText(group, ""+data, bbox, cb);
+    group.node().addEventListener('click', function() { return cb.origin(data); });
+    return group;
+}
+
+function fittedText(group, text, bbox, cb) {
+    console.log('fitted text ', text, bbox);
+    var elem = group.append('svg:text').attr('x',0).attr('y',0).attr('font-family','Verdana').attr('font-size',10);
+    elem.attr('alignment-baseline', 'text-before-edge').text(text);
+    var startBox = elem.node().getBBox();
+    console.log(startBox, bbox);
+    var scaleWidth = bbox.width / startBox.width;
+    var scaleHeight = bbox.height / startBox.height;
+    elem.attr('transform', 'translate('+bbox.x+','+bbox.y+') scale('+Math.min(scaleWidth, scaleHeight)+')');
+    return elem;
+}
+
 function bbox(d3elem) {
     return d3elem.node().getBBox();
+}
+
+function TraceableData(data, savedExecution) {
+    this.data = data;
+    this.saved = savedExecution;
+}
+
+var _ELLIPSIS = new Object();
+function layoutMapData(container, data, bbox, cb) {
+    var group = container.append('svg:g');
+    // TODO
+    return group;
+}
+function layoutListData(container, wfData, bbox, cb) {
+    var data = wfData.toArray();
+    var count = data.length;
+    var isWide = (bbox.width > bbox.height);
+    var longSide = (isWide) ? bbox.width : bbox.height;
+    var group = container.append('svg:g');
+
+    function iterate(items) {
+	var ct = items.length;
+	var run = longSide / ct;
+	var n = 2;
+	items.forEach(function(item, idx) {
+	    var start = longSide * idx / ct;
+	    var newBox, divider;
+	    if (isWide) {
+		newBox = {x:bbox.x+n+start, y:bbox.y+n, width:run-2*n, height:bbox.height-2*n};
+		if (idx > 0) {
+		    divider = group.append('svg:line').attr('x1',newBox.x).attr('y1',newBox.y).attr('x2',newBox.x).attr('y2',newBox.y+newBox.height);
+		}
+	    } else {
+		newBox = {x:bbox.x+n, y:bbox.y+n+start, width:bbox.width-2*n, height:run-2*n};
+		if (idx > 0) {
+		    divider = group.append('svg:line').attr('x1',newBox.x).attr('y1',newBox.y).attr('x2',newBox.x+newBox.width).attr('y2',newBox.y);
+		}
+	    }
+	    layoutData(group, item, newBox, cb);
+	    if (divider) {
+		divider.attr('stroke','#600');
+		divider.node().addEventListener('click', function() { return cb.origin(wfData); });
+	    }
+	});
+    }
+
+    var doCompress = (longSide / count) < 12;
+    if (doCompress) {
+	var numItems = Math.floor((longSide - 5) / 12) + 1;
+	if (numItems <= 0) {
+	    layoutData(group, _ELLIPSIS, bbox, cb);
+	    return group;
+	} else if (numItems == 1) {
+	    data = data[0].concat([_ELLIPSIS]);
+	} else {
+	    data = data.slice(0, numItems - 1).concat([ellipsis]).concat(data[data.length - 1]);
+	}
+    }
+    iterate(data);
+    return group;
+}
+function layoutFunctionData(container, data, bbox, cb) {
+    var group = fittedText(container, '<func>', bbox);
+    group.node().addEventListener('click', function() { return cb.origin(data); });
+    return group;
+}
+function layoutError(container, data, bbox, cb) {
+    var group = fittedText(container, '<err>', bbox);
+    group.node().addEventListener('click', function() { return cb.origin(data); });
+    return group;
+}
+var _DATA_LAYOUTS = {
+    'number': linkableFittedText,
+    'string': linkableFittedText,
+    'null': linkableFittedText,
+    'error': layoutError,
+    'map': layoutMapData,
+    'list': layoutListData,
+    'function': layoutFunctionData,
+};
+function layoutData(container, data, bbox, cb) {
+    if (data === _ELLIPSIS) {
+	var group = fittedText(container, '...', bbox);
+	group.node().addEventListener('click', function() { return cb.origin(data); });
+	return group;
+    } else {
+	var typ = wf.typeOf(data);
+	return _DATA_LAYOUTS[typ](container, data, bbox, cb);
+    }
+}
+
+function updateInputsAndOutputs(module) {
+    var callstack = [];
+    // TODO this whole thing needs to be inverted ... shouldn't call strand stuff here
+    // instead should do the calculation here and have the strand stuff use that.
+    wf.visitModule(module, {
+	bottomUpFn: function(fn, path, module) {
+	    var strand = codeToStrand(fn.code, null);
+	    fn._wft_numConsumed = fn.numConsumed = strand.numConsumed;
+	    fn._wft_numProduced = fn.numProduced = strand.numProduced;
+	},
+	op: function(codeOp, path, fn) {
+	    var basic = baseVisuals[codeOp.op];
+	    if (basic !== undefined) {
+		codeOp._wft_numConsumed = basic.numConsumed;
+		codeOp._wft_numProduced = basic.numProduced;
+	    } else {
+		var target = resolveFn(codeOp.op, module);
+		// TODO handle mutual recursion somehow!
+		codeOp._wft_numConsumed = target.fn.numConsumed;
+		codeOp._wft_numProduced = target.fn.numProduced;
+	    }
+	}
+    });
 }
 
 function layoutModule() {
@@ -132,6 +264,9 @@ function layoutModule() {
     }
     var env = runState.codeEnv;
     var module = env.modules[runState.ideState.moduleUrls[0]];
+
+    updateInputsAndOutputs(module);
+
     var y = 0;
     var box = bbox(svgText(group, 0, 0, module.name, 28));
     y += box.height;
@@ -192,7 +327,9 @@ function strandItemWidth(strandItem) {
 function optimizeStrandItems(strand) {
     while(true) {
 	var result = optimizeStrandItemsPass(strand);
-	if (result.length == strand.length) return result;
+	if (result.length == strand.length) {
+	    return result;
+	}
 	strand = result;
     }
 }
@@ -228,10 +365,16 @@ function blockToStrand(block, env) {
 	return codeStrand;
     }
     var condStrand = codeToStrand(block.condition, env);
-    var numInputs = Math.max(condStrand.numInputs, codeStrand.numInputs);
-    condStrand.numInputs = numInputs;
-    codeStrand.numInputs = numInputs;
-    return {cond:condStrand, code:codeStrand}
+    var numConsumed = Math.max(condStrand.numConsumed, codeStrand.numConsumed);
+    var numProduced = codeStrand.numProduced + (numConsumed - codeStrand.numConsumed);
+    condStrand.numConsumed = numConsumed;
+    codeStrand.numConsumed = numConsumed;
+    return {
+	cond:condStrand, 
+	code:codeStrand,
+	numConsumed: numConsumed,
+	numProduced: numProduced,
+    }
 }
 
 var baseVisuals = {
@@ -239,7 +382,7 @@ var baseVisuals = {
 	return {lineText:[JSON.stringify(op.val)], numConsumed:0, numProduced:1, depth:0}; 
     },
     'lambda': function(op, env) {
-	return {lineText:[''], numConsumed:0, numProduced:1, depth:0, subStrands:[codeToStrand(op.code, env)]}
+	return {lineText:[''], syncArgs:false, numConsumed:0, numProduced:1, depth:0, subStrands:[codeToStrand(op.code, env)]}
     },
     'callLambda': function(op, env) {
 	return {lineText:['call'], numConsumed:op.numConsumed + 1, numProduced:op.numProduced, depth:0}
@@ -251,11 +394,20 @@ var baseVisuals = {
 	return {lineText:[op.name+'>'], numConsumed:0, numProduced:1, depth:0};
     },
     'cond': function(op, env) {
-	var branches = op.branches.map(function(branch){ return blockToStrand(branch); });
+	var maxConsumed = 0;
+	var maxProduced = 0;
+	var branches = op.branches.map(function(branch){
+	    var strand = blockToStrand(branch); 
+	    maxConsumed = Math.max(maxConsumed, strand.numConsumed);
+	    maxProduced = Math.max(maxProduced, strand.numProduced);
+	    console.log('cond ', maxConsumed, maxProduced, strand);
+	    return strand;
+	});
+	console.log('cond analysis ', maxConsumed, maxProduced, branches);
 	if (branches.length > 0) {
 	    branches[branches.length - 1].tailOfConditional = op;
 	}
-	return {lineText:[''], numConsumed:0, numProduced:0, depth:0, subStrands:branches};
+	return {lineText:[''], syncArgs:true, numConsumed:maxConsumed, numProduced:maxProduced, depth:0, subStrands:branches};
     },
     'dynamicScope': function(op, env) {
 	var strand = codeToStrand(op.code, env);
@@ -268,27 +420,20 @@ var baseVisuals = {
 function codeToStrand(code, env) {
     var items = code.map(function(op){return opToStrandItem(op, env, code);});
     items = optimizeStrandItems(items);
+    var collapsed = collapseStrand(items);
     return {
 	items: items,
-	numInputs: collapseStrand(items).numConsumed,
+	numConsumed: collapsed.numConsumed,
+	numProduced: collapsed.numProduced,
 	codearray: code,
     };
-}
-function resolveFn(op, module) {
-    var idx = op.indexOf(':');
-    if (idx == -1) {
-	return module.functions[op];
-    } else {
-	var targetModule = runState.codeEnv.modules[module.refs[parseInt(op.substring(0,idx))].url];
-	return targetModule.functions[op.substring(idx + 1)];
-    }
 }
 
 function opToStrandItem(op, env, containingOpList) {
     var result;
     var visualization = baseVisuals[op.op];
     if (visualization === undefined) {
-	var fn = resolveFn(op.op, runState.curModule());
+	var fn = resolveFn(op.op, runState.curModule()).fn;
 	result = {lineText:[fn.name], numConsumed:fn.numConsumed, numProduced:fn.numProduced, depth:0};
     } else {
 	result = visualization(op, env);
@@ -318,8 +463,21 @@ function nextVersionUrl(curUrl) {
     return parts.join('/');
 }
 
+function cleanModule(module) {
+    function strip(node, path) {
+	Object.keys(node).forEach(function(key) {
+	    if (key.length > 0 && key[0] === '_') {
+		console.log('deleting key ', key, '@ ', path);
+		delete node[key];
+	    }
+	});
+    }
+    wf.wfVisitModule(module, {fn:strip, block:strip, op:strip});
+}
+
 function saveModule(url, module, okCb, errCb) {
     console.log('saving module ', url);
+    cleanModule(module);
     var body = JSON.stringify(module);
     http('PUT', url, body, okCb, errCb);
     return makesha(body);
@@ -343,11 +501,13 @@ function loadModules(urls, env, loadedCb, idx) {
     if (idx < 0) {
 	loadedCb();
     } else {
-	loadModule(urls[idx], env, function(){ loadModules(urls, env, loadedCb, idx - 1); });
+	var loadNext = function(){ loadModules(urls, env, loadedCb, idx - 1); };
+	loadModule(urls[idx], env, loadNext,
+		   function() { console.log('load failed on '+urls[idx]); return loadNext();});
     }
 }
 
-function loadModule(url, env, loadedCb) {
+function loadModule(url, env, loadedCb, errCb) {
     console.log('loading module ', url);
     env.loading[url] = 1;
     http('GET', url, null, function(body) {
@@ -357,17 +517,17 @@ function loadModule(url, env, loadedCb) {
 	env.modules[url] = module;
 	module.refs.forEach(function(ref) {
 	    if (env.modules[ref.url] === undefined && env.loading[ref.url] === undefined) {
-		loadModule(ref.url, env, loadedCb);
+		loadModule(ref.url, env, loadedCb, errCb);
 	    }
 	});
-	var declaredFunctions = module.functions;
-	for(var key in declaredFunctions) {
-	    env.functions[hsh+':'+key] = declaredFunctions[key];
-	}
 	// check to see if I am the last module loaded
 	if (Object.keys(env.loading).length === 0) {
 	    loadedCb();
 	}
+    }, function(err) {
+	console.log('unable to load module ', err, url);
+	delete env.loading[url];
+	errCb(err);
     });
 }
 
@@ -389,6 +549,7 @@ function layoutStrand(container, strand, recurDepth) {
 		if (lastBranch.code.length + lastBranch.condition.length === 0) {
 		    branches.pop();
 		    if (branches.length === 0) {
+			// removeFromArray(containingConditional, ???);
 			console.log('NOT IMPLEMENTED - delete conditional');
 		    } else {
 			console.log('NOT IMPLEMENTED - move to cursor after conditional');
@@ -420,7 +581,11 @@ function layoutStrand(container, strand, recurDepth) {
     var y = 0;
     var stackColors = ['#bbb','#ddd','#bbb','#999'];
     var cursors = [];
-    function plotStackLine(fromY) {
+    function plotStackLine() {
+	if (stackLines.length === 0) {
+	    console.log('consumed/produced inconsistency detected');
+	    return;
+	}
 	var x = stackLines.length * stackSpacing;
 	var width = stackSpacing;
 	var y1 = stackLines.pop();
@@ -429,7 +594,7 @@ function layoutStrand(container, strand, recurDepth) {
 	lineGroup.append('svg:rect').attr('x',x).attr('width',width).attr('y',y1).attr('height',height).attr('fill',fill).attr('stroke','none');
     }
     function curIndent(outdent) { return (stackLines.length - outdent + 1.3) * stackSpacing; }
-    for(var i=strand.numInputs - 1; i>=0; i--) {
+    for(var i=strand.numConsumed - 1; i>=0; i--) {
 	stackLines.push(0);
     }
     y += lineHeightMargin;
@@ -441,11 +606,23 @@ function layoutStrand(container, strand, recurDepth) {
 	var startX = curIndent(item.depth);
 	if (item.subStrands && item.subStrands.length > 0) {
 	    item.subStrands.forEach(function(subStrand, idx) {
+		// TODO if these substrands are conditionals, we need to reconcile the inputs and outputs 
+		// together with the external code.  if it's a lambda, it doesn't matter
 		var subContainer = textGroup.append('svg:g');
 		var rec = layoutStrand(subContainer, subStrand, recurDepth + 1);
 		cursors = cursors.concat(rec.cursors);
 		var subWidth = rec.bbox.width;
 		var subHeight = rec.bbox.height;
+		if (item.syncArgs) {
+		    if (subStrand.numConsumed !== item.numConsumed) {
+			console.log('branch does not consume as many values as others');
+			subContainer.append('svg:circle').attr('cx',subWidth/2).attr('cy', 0).attr('r', 6).attr('fill','#a22');
+		    }
+		    if (subStrand.numProduced !== item.numProduced) {
+			console.log('branch does not produce as many values as others');
+			subContainer.append('svg:circle').attr('cx',subWidth/2).attr('cy', subHeight).attr('r', 6).attr('fill','#a22');
+		    }
+		}
 		if (idx !== 0) {
 		    textGroup.append('svg:line').attr('x1',startX).attr('y1',y).attr('x2',startX+subHeight).attr('y2',y).attr('stroke','#600');
 		}
@@ -500,7 +677,6 @@ function makeDragHandle(group, x, y, handleRadius, dragCb, tapCb, userSuppliedHa
     var cy=null;
     var touchable = handle[0][0];
     var touchId=null;
-    var didMove = false;
     function scroll() {
 	if (sx === null) {
 	    dragCb(0, 0, handle);
@@ -509,21 +685,38 @@ function makeDragHandle(group, x, y, handleRadius, dragCb, tapCb, userSuppliedHa
 	    setTimeout(scroll, 20);
 	}
     }
+    var longTouchTimer=null;
+    function clearLongTouchTimer() {
+	if (longTouchTimer !== null) {
+	    clearTimeout(longTouchTimer);
+	    longTouchTimer = null;
+	}
+    }
     touchable.addEventListener('touchstart', function(evt){
-	didMove=false;
+	if (tapCb && tapCb.longexec) {
+	    clearLongTouchTimer();
+	    longTouchTimer = setTimeout(function() {
+		tapCb.longexec();
+		touchId=sx=sy=cx=cy=null;
+	    }, 1000);
+	}
 	touchId = evt.changedTouches[0].identifier;
 	cx=sx=evt.changedTouches[0].pageX;
 	cy=sy=evt.changedTouches[0].pageY;
 	scroll();
     });
     touchable.addEventListener('touchend', function(evt){
+	clearLongTouchTimer();
 	touchId=sx=sy=cx=cy=null;
     });
     touchable.addEventListener('click', function(evt){
-	tapCb();
+	clearLongTouchTimer();
+	if (tapCb) {
+	    tapCb();
+	}
     });
     touchable.addEventListener('touchmove', function(evt){
-	didMove=true;
+	clearLongTouchTimer();
 	if (touchId !== null) {
 	    for(var i=0; i<evt.changedTouches.length; i++) {
 		var touch = evt.changedTouches[i];
@@ -560,6 +753,29 @@ function makeViewer(group, centerx, centery, transformCb){
     return {
 	translate: trans,
 	centerOnCursor: centerOnCursor,
+	findCursorsContainingFn: function() { 
+	    var curFnId;
+	    var resultFnId;
+	    wf.visitModule(runState.curModule(), {
+		fn: function(fn, path) {
+		    curFnId = path[0];
+		},
+		op: function(codeOp) {
+		    if (codeOp === cursor.opident) resultFnId = curFnId;
+		}
+	    });
+	    console.log('fn for cursor: ', resultFnId);
+	    return resultFnId;
+	},
+	findCursorForOp: function(opRec) {
+	    var cursors = runState.rootLayout.cursors;
+	    for(var i=0; i<cursors.length; i++) {
+		if (cursors[i].opident === opRec) {
+		    return cursors[i];
+		}
+	    }
+	    return undefined;
+	},
 	scale: function(factor) {zoom *= factor; render();},
 	setContent: function(newGroup, centerCursor) {
 	    group.node().parentNode.removeChild(group.node());
@@ -639,6 +855,11 @@ function saveIdeState(ideState) {
     window.localStorage.setItem(IDE_STATE_KEY, JSON.stringify(runState.ideState));
 }
 
+function onTestsComplete(results) {
+    runState.explorer.setTestResults(results);
+    runState.explorer.updateDisplay();
+}
+
 var ideState = loadIdeState();
 console.log('Loaded IDE state:', ideState);
 
@@ -647,7 +868,7 @@ var runState = {
     rootLayout: {group:codeRoot.append('svg:g'), cursors:[]},
     viewer: null,
     codeEnv: env,
-    execution: setupExecutionContext(function(ret){console.log('test results ', ret);}),
+    execution: setupExecutionContext(onTestsComplete),
     curModule: function() { return env.modules[ideState.moduleUrls[0]]; },
     module: function(idx) { return env.modules[ideState.moduleUrls[idx]]; }
 }
@@ -682,8 +903,8 @@ function buttonArc(container, x, y, radius, startAngle, items) {
 	}
 	
 
-
-	var txt = svgText(button, x, y - radius, item.label, 16);
+	var txtSize = (item.label.length == 1) ? 24 : 16;
+	var txt = svgText(button, x, y - radius, item.label, txtSize);
 
 	var tapCb = function(){};
 
@@ -691,27 +912,9 @@ function buttonArc(container, x, y, radius, startAngle, items) {
 	    tapCb = function() {
 		item.exec();
 	    };
-	    /*
-		var timeout;
-		var longTouch = false;
-		if (item.exec.longexec) {
-		    txt.node().addEventListener('touchstart', function(evt) {
-			timeout = setTimeout(function() {
-			    longTouch = true;
-			    item.exec.longexec();
-			}, 1000);
-			return false;
-		    });
-		}
-		txt.node().addEventListener('click', function(evt) {
-		    longTouch = false;
-		    clearTimeout(timeout);
-		    if (! longTouch) {
-			item.exec();
-		    }
-		});
+	    if (item.exec.longexec) {
+		tapCb.longexec = item.exec.longexec;
 	    }
-	    */
 	}
 	var handle = makeDragHandle(button, x, y - radius, 8, dragCb, tapCb, txt);
 
@@ -722,10 +925,13 @@ function buttonArc(container, x, y, radius, startAngle, items) {
     return shelf;
 }
 
-s.elem.append('svg:rect').attr('x','1').attr('y',s.topSplit).attr('width',s.r(2)).attr('height',s.bottomSplit-s.topSplit).style('fill','#ddd').style('stroke','black').style('stroke','none');
-s.elem.append('svg:rect').attr('x','1').attr('y','1').attr('width',s.r(2)).attr('height',s.b(2)).style('fill-opacity','0').style('stroke','black').style('stroke-width',2);
+// outside border
+//s.elem.append('svg:rect').attr('x','1').attr('y','1').attr('width',s.r(2)).attr('height',s.b(2)).style('fill-opacity','0').style('stroke','black').style('stroke-width',2);
 
-var CORE_MODULE_URL = 'http://millstonecw.com:11739/module/e842e7e98ff94fc79dc801432c0da4f8'
+// controls area
+s.elem.append('svg:rect').attr('x','0').attr('y',s.topSplit).attr('width',s.r(0)).attr('height',s.bottomSplit-s.topSplit).style('fill','#ddd').style('stroke','none');
+
+var CORE_MODULE_URL = 'http://millstonecw.com:11739/module/12db0c6b9d2a0776a3f1599b0fb40fff';
 
 function newModule(moduleUrl, overrides) {
     var ret = {
@@ -792,7 +998,7 @@ document.getElementById('mainMenuDelete').onclick = function() {
     var urls = runState.ideState.moduleUrls;
     var moduleUrl = urls[0];
     deleteModule(moduleUrl, function() {
-	runState.ideState.moduleUrl = urls.slice(1);
+	runState.ideState.moduleUrls = urls.slice(1);
 	mainMenuDialog.close();
 	switchModuleDisplay();
     }, function() {
@@ -869,22 +1075,29 @@ function moduleSearcher(type) {
 	searchBox.focus();
     }
 };
+function domClear(container) {
+    while (container.firstChild) {
+	container.removeChild(container.firstChild);
+    }
+}
+
 setupInput(searchBox, function() {
     var searchString = searchBox.value;
     var ideState = runState.ideState;
     searchModules(ideState.repoRoot, searchString, function(hits) {
-	while (resultList.firstChild) {
-	    resultList.removeChild(resultList.firstChild);
-	}
+	domClear(resultList);
 	hits.forEach(function(hit) {
 	    var li = document.createElement('li');
 	    li.textContent = hit.name + ' ' + (hit['forkedFrom'] || {})['date'];
 	    resultList.appendChild(li);
 	    li.onclick = function() {
 		var url = ideState.repoRoot+'/'+hit.id;
+		console.log('url0', url);
 		loadModule(url, env, function() {
+		    console.log('url1', url);
 		    var module = runState.codeEnv.modules[url];
 		    openModuleDialog.close();
+		    console.log('url2', url);
 		    var options = {
 			edit: function() {
 			    ideState.moduleUrls.splice(0, 0, url);
@@ -914,11 +1127,19 @@ setupInput(searchBox, function() {
 			    });
 			},
 			include: function() {
-			    throw new Error('to be implemented');
+			    console.log('url3', url);
+			    var refs = runState.curModule().refs;
+			    if (typeof url !== 'string') throw new Error('eh? '+url);
+			    refs.push({url: url});
+			    runState.controls.regenModuleButtons();
 			}
 		    };
+		    console.log('opening action');
 		    options[openAction]();
 		    openAction = null;
+		}, function(err) {
+		    console.log('unable to load module: '+err);
+                    openModuleDialog.close();
 		});
 	    };
 	});
@@ -983,8 +1204,12 @@ function transformCb() {
     var cursorBBox = null;
     runState.rootLayout.cursors.forEach(function(candidate) {
 	var bbox = candidate.node.getBoundingClientRect();
-	var dx = (bbox.left + bbox.right) / 2 - centerX;
-	var dy = (bbox.top + bbox.bottom) / 2 - centerY;
+	var dx = 0.0;
+	var dy = 0.0;
+	if (centerX < bbox.left)   dx = bbox.left   - centerX;
+	if (centerX > bbox.right)  dx = bbox.right  - centerX;
+	if (centerY < bbox.top)    dy = bbox.top    - centerY
+	if (centerY > bbox.bottom) dy = bbox.bottom - centerY;
 	var curDist = dx*dx + dy*dy;
 	if (curDist < minCursorDistance) {
 	    cursorBBox = bbox;
@@ -1004,6 +1229,7 @@ function transformCb() {
 	if (cursor && cursor.optype != (oldCursor||{}).optype) {
 	    runState.controls.setMode(cursor.optype);
 	}
+	runState.explorer.updateDisplay();
     }
 }
 
@@ -1036,6 +1262,7 @@ function setupExecutionContext(onTestComplete) {
 		if (fn.tags.indexOf('assert') === -1) return;
 		if (fn.numConsumed > 0) return;
 		var testResult = runTest(moduleUrl, fnId);
+		fn._wft_test_trace = testResult.trace;
 		moduleTestResults.functions[fnId] = testResult;
 		if (! testResult.ok) moduleTestResults.ok = false;
 	    });
@@ -1104,6 +1331,8 @@ function promptInput(cb, startText, type) {
     var input = document.createElement('input');
     input.setAttribute('type', type || 'text');
     input.setAttribute('style', 'display:block; position:absolute; left:10%; top:5%; width:80%');
+    input.setAttribute('autocapitalize', 'none');
+    input.setAttribute('autocorrect', 'none');
     if (startText) {
 	input.setAttribute('value', startText);
     }
@@ -1156,12 +1385,16 @@ function newNumber() {
 }
 
 function newCond() {
+    var conditionCode = [];
     insertAtCursor({
 	op: 'cond',
 	branches: [
-	    {condition:[], code:[]}
+	    {condition: conditionCode, code: []}
 	]
     });
+    cursor = {opident: conditionCode, opcontainer: conditionCode, optype:'function'};
+
+
     runState.controls.setMode('op');
 }
 
@@ -1193,8 +1426,8 @@ function showInterfaceDialog(fn, cb) {
     var numOutputsBox = document.getElementById('interfaceDialogNumOutputs');
     var saveButton = document.getElementById('interfaceDialogSaveButton');
     nameBox.value = fn.name || '';
-    numInputsBox.value = fn.numInputs || '';
-    numOutputsBox.value = fn.numOutputs || '';
+    numInputsBox.value = fn.numConsumed || '';
+    numOutputsBox.value = fn.numProduced || '';
     saveButton.onclick = function() {
 	fn.name = nameBox.value;
 	fn.numConsumed = parseInt(numInputsBox.value);
@@ -1212,8 +1445,8 @@ function showCallLambdaDialog(cb) {
     var numOutputsBox = document.getElementById('callLambdaDialogNumOutputs');
     var doneButton = document.getElementById('callLambdaDialogDoneButton');
     doneButton.onclick = function() {
-	cb({numInputs: parseInt(numInputsBox.value),
-            numOutputs: parseInt(numOutputsBox.value)});
+	cb({numConsumed: parseInt(numInputsBox.value),
+            numProduced: parseInt(numOutputsBox.value)});
 	dialog.close();
     };
     dialog.show();
@@ -1234,7 +1467,7 @@ function basicFunction(values) {
 	fn[key] = values[key];
     }
     runState.curModule().functions[newid] = fn;
-    cursor = {opident: fn.code, opcontainer: fn.code, optype:'function'};
+    cursor = {opident: fn.code, opcontainer: fn.code, optype:'op'};
     layoutCode();
     return fn;
 }
@@ -1258,19 +1491,31 @@ function getFunctionId(fn, fnMap) {
     throw new Error("Function not found");
 }
 
-function lookupFunctionPointer(fnPointer, module) {
-    var parts = fnPointer.split(':');
-    var moduleUrl = module.refs[parseInt(parts[0])].url;
-    return lookupFunction(moduleUrl, parts[1]);
+function resolveFn(op, module) {
+    var idx = op.indexOf(':');
+    var fnId = null;
+    var url = undefined;
+    if (idx == -1) {
+	fnId = op;
+    } else {
+	url = module.refs[parseInt(op.substring(0,idx))].url;
+	module = runState.codeEnv.modules[url];
+	fnId = op.substring(idx + 1);
+    }
+    return {
+	module: module, 
+ 	fnId: fnId, 
+	fn: module.functions[fnId],
+	moduleUrl: url, // note this is undefined if it's a local reference
+    };
 }
 
 function lookupFunction(moduleUrl, fnId) {
     return runState.codeEnv.modules[moduleUrl].functions[fnId];
 }
 
-function newImplementation(moduleUrl, fnId) {
-    var baseFn = lookupFunction(moduleUrl, fnId);
-    return basicFunction({name:baseFn.name, overrides:fnId});
+function newImplementation(fn, fnId) {
+    return basicFunction({name:fn.name, overrides:fnId});
 }
 
 function editFunctionName() {
@@ -1323,8 +1568,9 @@ function callAdder(opid) {
 	runState.controls.setMode('op');
     };
     cb.longexec = function() {
-	var fn = lookupFunctionPointer(opid, runState.curModule());
-	console.log('override ', fn.name);
+	var fnRec = resolveFn(opid, runState.curModule());
+	newImplementation(fnRec.fn, fnRec.fnId);
+	runState.controls.setMode('op');
     };
     return cb;
 }
@@ -1347,17 +1593,25 @@ function lookupIdFromFunction(functions, fn) {
     return null;
 }
 
+function removeFromArray(item, arr) {
+    for(var i=0; i<arr.length; i++) {
+	if (item === arr[i]) {
+	    arr.splice(i, 1);
+	    return;
+	}
+    }
+    console.log('Item not present in array: ', item, ' arr:', arr);
+    throw new Error('Not present in array');
+}
+
 function cutOrCopy() {
     if (cursorIsAtTail()) return;
     var target = cursor.opident;
     if (cursor.optype === 'op') {
-	cursor.opcontainer.forEach(function(item, idx) {
-	    if (item === target) {
-		var globalIdx = runState.rootLayout.cursors.indexOf(cursor);
-		cursor.opcontainer.splice(idx, 1);
-		cursor = runState.rootLayout.cursors[(globalIdx + 1) % runState.rootLayout.cursors.length];
-	    }
-	});
+	removeFromArray(target, cursor.opcontainer);
+	var allCursors = runState.rootLayout.cursors
+	var globalIdx = allCursors.indexOf(cursor);
+	cursor = allCursors[(globalIdx + 1) % allCursors.length];
     } else if (cursor.optype === 'function') {
 	var functions = cursor.opcontainer;
 	var fnId = lookupIdFromFunction(functions, cursor.opident);
@@ -1372,7 +1626,7 @@ function undoOrRedo() {
 /*
                        1234567 1234567 1234567 1234567 1234567 1234567 1234567 1234567 1234567 1234567
         boolean:       if      t/e/c   and     or      !       =       <       >               ... all any
-        predicate:     isStr   isInt   isNum   isBool  isArr   isObj   isItrbl isIn
+        predicate:     isStr   isNum   isBool  isArr   isObj   isItrbl isIn
         constructor:   "..     #..     T       F       null    []      {}      `(quot)         ... "", 0, 1
         math:          +       -       *       /                                               ... range, mod
         compound:      get     ,(add)  ,:(+kv) ::      ins     pop     chop    r(ight) size    ... keysFor
@@ -1392,6 +1646,149 @@ compunds:
 */
 
 
+// TODO I think startModuleUrl and startFnId may always be equal to what's at the top of callStack, might remove
+function findOriginOfValue(value, executor, savedTrace, startStack, callStack) {
+    var optraceData = [];
+    var stackitem = callStack[callStack.length - 1];
+    var startModuleUrl = stackitem.moduleUrl;
+    var startFnId = stackitem.fnId;
+    console.log('trace executing {', startFnId);
+    executor(startModuleUrl, startFnId, startStack, wf.makeCachedTracer(savedTrace, optraceData));
+    console.log('trace executing }', startFnId);
+
+    function descendInto(index) {
+	var opRec = optraceData[index][0];
+	var opInputs = optraceData[index][1];
+	if (wf.isFunctionCall(opRec.op)) {
+	    var resolved = opRec._resolved;
+	    var fn = runState.codeEnv.modules[resolved[0]].functions[resolved[1]];
+	    if (fn.nativeCode && fn.nativeCode[wf.interpreterId]) {
+		return opRec;
+	    }
+	    //var resolved = resolveFn(opRec.op, runState.codeEnv.modules[startModuleUrl]);
+	    console.log('found fn call resolved:', resolved);
+	    console.log('found fn call inputs as rememebered:', wf.stackToWfList(opInputs).toJS());
+	    callStack.push({moduleUrl:resolved[0], fnId:resolved[1], stack:opInputs, opRec:opRec});
+	    return findOriginOfValue(value, executor, savedTrace, opInputs, callStack);
+	} else {
+	    return opRec;
+	}
+    }
+
+    for(var i=0; i<optraceData.length; i++) {
+	var pair = optraceData[i];
+	var opRec = pair[0];
+	var stack = pair[1];
+	var path = wf.findValueIn(value, wf.stackToWfList(stack));
+	console.log('find origin itr ', opRec.op, ' foundpath: ',path);
+	if (path === undefined) continue;
+	if (i === 0) { // since the beginning, just give the start op
+	    return opRec;
+	} else { // the previous op would be the one that added the value
+	    return descendInto(i - 1);
+	}
+    }
+    // value must have been create at the very end (hopefully)
+    return descendInto(optraceData.length - 1);
+}
+
+function setupExplorer() { // thing at the bottom that shows data structures
+    var dims = {x:0, y:s.bottomSplit, width:s.r(0), height: s.b(0) - s.bottomSplit};
+    var background = s.elem.append('svg:rect').attr('x',dims.x).attr('y',dims.y).attr('width',dims.width).attr('height',dims.height).style('fill','#eee').style('stroke','none');
+    var container = s.elem.append('svg:g');
+    var testResults = {modules:{}};
+    
+    // these relate to a specific execution context:
+    var executor, trace;
+    var callStack = [];
+
+    function showTestData(moduleUrl, fnId, opRec) {
+	callStack = [];
+	var moduleTests = testResults.modules[moduleUrl];
+	if (! moduleTests) return;
+	var test = moduleTests.functions[fnId];
+	if (! test) return;
+	callStack.push({moduleUrl: moduleUrl, fnId:fnId, stack:wf.emptyStack(), opRec:opRec});
+	executor = test.executor;
+	trace = test.trace;
+	return showExecutionData();
+    }
+    function showExecutionDataAt(moduleUrl, fnId, opRec) {
+	while(callStack.length > 0) {
+	    var stackItem = callStack[callStack.length - 1];
+	    if (stackItem.moduleUrl === moduleUrl && stackItem.fnId === fnId) {
+		if (opRec !== stackItem.opRec) {
+		    stackItem.opRec = opRec;
+		    showExecutionData();
+		}
+		return;
+	    } else {
+		return;
+		// not right with lambdas:
+		console.log('POPPING CALLSTACK ', JSON.stringify(callStack[callStack.length - 1]));
+		callStack.pop();
+	    }
+	}
+	clearDisplay();
+    }
+    function showExecutionData() {
+	var stackitem = callStack[callStack.length - 1];
+	console.log('showexecutiondata callstacktop', stackitem);
+	var moduleUrl = stackitem.moduleUrl;
+	var fnId = stackitem.fnId;
+	var opRec = cursor.opident;//stackitem.opRec;
+	var optraceData = [];
+	var tracer = wf.makeCachedTracer(trace, optraceData);
+	executor(moduleUrl, fnId, stackitem.stack, tracer);
+	var thisPair = optraceData.filter(function(pair) { return pair[0] === opRec; });
+	// TODO this can produce multiple hits for a lambda
+	console.log('lookup zzz ', opRec, ' in ', optraceData, ' produced ', thisPair, ' callstack stack ', stackitem.stack);
+	clearDisplay();
+	if (thisPair.length > 0) {
+	    var originCb = function(data) {
+		var origin = findOriginOfValue(data, executor, trace, stackitem.stack, callStack);
+		console.log('ORIGIN', origin, ' from data ', data);
+		var newCursor = runState.viewer.findCursorForOp(origin);
+		if (newCursor) {
+		    runState.viewer.centerOnCursor(newCursor);
+		    showExecutionData();
+		} else {
+		    console.log('Unable to find cursor for origin: ', origin);
+		}
+	    };
+	    var stackData = wf.stackToWfList(thisPair[0][1]).reverse(); // top item on right
+	    layoutData(container, stackData, dims, {origin: originCb});
+	}
+    }
+    function clearDisplay() {
+	domClear(container.node());
+    }
+    return {
+	setTestResults: function(r) {
+	    testResults = r;
+	},
+	updateDisplay: function() {
+	    console.log('lookup zzz {{{{');
+	    console.log('explorer: updateDisplay() callstack:', callStack);
+	    var curFnId = runState.viewer.findCursorsContainingFn();
+	    if (curFnId) {
+		var curModuleUrl = runState.ideState.moduleUrls[0];
+		if (callStack.length > 0) {
+		    showExecutionDataAt(curModuleUrl, curFnId, cursor.opident);
+		} else {
+		    showTestData(curModuleUrl, curFnId, cursor.opident);
+		}
+	    } else {
+		clearDisplay();
+	    }
+	    console.log('lookup zzz }}}}');
+	},
+	showTestData: showTestData,
+    };
+}
+
+
+
 function setupControls() {
     var yCentroid = s.bottomSplit + 50;
     var fnMenu1 = buttonArc(s.elem,  s.r(0), yCentroid, 143, -130, [//-68, [
@@ -1409,17 +1806,15 @@ function setupControls() {
 	{label:'undo', exec:undoOrRedo}
     ]);
     
-    var opMenu1 = buttonArc(s.elem,  s.r(0), yCentroid, 135, -130, [//-68, [
-	{label:'kil', exec:callAdder('0:k')},
+    var opMenu1 = buttonArc(s.elem,  s.r(0), yCentroid, 135, -70, [//-68, [
+	//{label:'kil', exec:callAdder('0:k')},
 	{label:'sav', exec:saveVar},
 	{label:'lod', exec:loadVar},
 	{label:'rse'},
 	{label:'drp'},
-	{label:'swp', exec:callAdder('0:s')},
-	{label:'dup', exec:callAdder('0:d')},
-	{label:'swp2', exec:callAdder('0:S')},
-	{label:'dup2', exec:callAdder('0:D')},
-    ]);
+	//{label:'swp', exec:callAdder('0:s')},
+	//{label:'dup', exec:callAdder('0:d')},
+    ].concat(buttonsForModule(moduleForRef(0), 0, 'navigation')));
     
     var opMenu2 = buttonArc(s.elem,  s.r(0), yCentroid, 158, -72, [
 	{label:'bln', exec:moduleMenu(0, 'boolean', [{label:'cond', exec:newCond}])},
@@ -1484,6 +1879,7 @@ function setupControls() {
     
     var curMode = ''
     function setMode(newMode, extras) {
+	console.log('setmode from:', curMode, ' to:', newMode, extras);
 	if (curMode == newMode) return;
 	modeElements[curMode].forEach(function(elem) {
 	    elem.attr('display','none');
@@ -1504,30 +1900,38 @@ function setupControls() {
 	}
 	curMode = newMode;
     }
+    function moduleForRef(refIndex) {
+	var curModule = runState.curModule();
+	if (refIndex == -1) {
+	    return curModule;
+	} else if (curModule) {
+	    var ref = curModule.refs[refIndex];
+	    if (ref !== undefined) {
+		var moduleUrl = ref.url;
+		return runState.codeEnv.modules[moduleUrl];
+	    }
+	}
+    }
+    function buttonsForModule(module, moduleIndex, tag) {
+	console.log('buttons for module ', moduleIndex, tag, module);
+	if (! module) return [];
+	var functions = module.functions;
+	var fids = Object.keys(functions);
+	if (tag) {
+	    fids = fids.filter(function(fid){return functions[fid].tags.indexOf(tag) != -1;});
+	}
+	console.log('buttons for module fids ', fids);
+	return fids.map(function(fid) {
+	    var cb = (moduleIndex === -1) ? callAdder(fid) : callAdder(moduleIndex+':'+fid);
+	    return {label:functions[fid].name, exec:cb};
+	});
+    }
     function moduleMenu(moduleIndex, tag, extras) {
 	return function() {
-	    var curModule = runState.curModule();
-	    var module = null;
-	    if (moduleIndex == -1) {
-		module = curModule;
-	    } else {
-		var ref = curModule.refs[moduleIndex];
-		if (ref !== undefined) {
-		    var moduleUrl = ref.url;
-		    module = runState.codeEnv.modules[moduleUrl];
-		}
-	    }
+	    var module = moduleForRef(moduleIndex);
 	    var buttons;
 	    if (module !== null) {
-		var functions = module.functions;
-		var fids = Object.keys(functions);
-		if (tag) {
-		    fids = fids.filter(function(fid){return functions[fid].tags.indexOf(tag) != -1;});
-		}
-		buttons = fids.map(function(fid) {
-		    var cb = (moduleIndex === -1) ? callAdder(fid) : callAdder(moduleIndex+':'+fid);
-		    return {label:functions[fid].name, exec:cb};
-		});
+		var buttons = buttonsForModule(module, moduleIndex, tag);
 	    } else {
 		buttons = [];
 	    }
@@ -1547,27 +1951,34 @@ function setupControls() {
     };
 }
 
-var controls = setupControls();
-runState.controls = controls;
-
 var modulesToLoad = [wf.platformImplUrl].concat(ideState.moduleUrls);
 loadModules(modulesToLoad, env, function() {
     //switchModuleDisplay();
+    runState.controls = setupControls();
+    runState.explorer = setupExplorer();
     runState.rootLayout = layoutModule();
     runState.controls.regenModuleButtons();
     runState.viewer.setContent(runState.rootLayout.group, runState.rootLayout.cursors[0]);
     runState.execution.triggerTests();
+    runState.controls.setMode('op');
 });
 
-function runTest(moduleUrl, fnId) {
-    var lcls = null;
-    var tracer = wf.makeSavingTracer();
+function makeResolver() {
     var modules = runState.codeEnv.modules;
-    var resolver = {
+    return {
 	resolve: function(moduleId) { return modules[moduleId]; },
 	moduleId:function(ref) { return ref.url; },//makesha(JSON.stringify(modules[ref.url])); },
     };
-    var resultStack = wf.execute(moduleUrl, fnId, resolver, lcls, tracer, [wf.platformImplUrl]);
-    return {'ok': resultStack.length === 1 && !!resultStack[0], 'trace': tracer}
+}
+
+function prepareWf(moduleUrl) {
+    return wf.prepare(moduleUrl, makeResolver(), [wf.platformImplUrl]);
+}
+
+function runTest(moduleUrl, fnId) {
+    var executor = prepareWf(moduleUrl); 
+    var tracer = wf.makeSavingTracer();
+    var resultStack = executor(moduleUrl, fnId, wf.emptyStack(), tracer);
+    return {'ok': resultStack.length === 1 && !!resultStack[0], 'trace': tracer, 'executor': executor}
 }
 
