@@ -1,6 +1,6 @@
 # wildflower-touch
 
-A Wildflower IDE for touch devices.
+A [Wildflower](https://github.com/pschanely/wildflower) IDE for touch devices.
 
 This is a hack.  It really doesn't work yet.  Don't try to use it.
 
