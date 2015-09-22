@@ -8,3 +8,7 @@ Here's a demo of me implementing the solution to [problem one](https://projecteu
 
 ![Wildflower solution to Project Euler, problem one](https://raw.githubusercontent.com/pschanely/wildflower-touch/master/eulerone.gif)
 
+Pure functional languages let us do some pretty great things in the IDE.  More people should be talking about that.  Here's one: given any value in a test, trace it back to the point in the code where it first appeared:
+
+![Data path tracing in wildflower-touch](https://raw.githubusercontent.com/pschanely/wildflower-touch/master/datapath.gif)
+

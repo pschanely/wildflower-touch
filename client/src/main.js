@@ -87,7 +87,8 @@ function genSvg(width, height) {
     return svgState;
 }
 
-function genEditorState() {
+function bbox(d3elem) {
+    return d3elem.node().getBBox();
 }
 
 
@@ -119,29 +120,37 @@ function svgText(group, x, y, text, ptSize, rot) {
     return textElem;
 }
 
-function linkableFittedText(group, data, bbox, cb) {
-    var group = fittedText(group, ""+data, bbox, cb);
-    group.node().addEventListener('click', function() { return cb.origin(data); });
-    return group;
-}
-
 function fittedText(group, text, bbox, cb) {
-    var elem = group.append('svg:text').attr('x',0).attr('y',0).attr('font-family','Verdana').attr('font-size',10);
-    elem.attr('alignment-baseline', 'text-before-edge').text(text);
+    var containerGroup = group.append('svg:g');
+    var elem = containerGroup.append('svg:text').attr('x',0).attr('y',0).attr('font-family','Verdana').attr('font-size',10);
+    elem.attr('alignment-baseline', 'middle').attr('text-anchor','middle').text(text);
     var startBox = elem.node().getBBox();
     var scaleWidth = bbox.width / startBox.width;
     var scaleHeight = bbox.height / startBox.height;
-    elem.attr('transform', 'translate('+bbox.x+','+bbox.y+') scale('+Math.min(scaleWidth, scaleHeight)+')');
+    var scale = Math.min(scaleWidth, scaleHeight);
+    elem.attr('transform', 'translate('+ 
+	      (bbox.x + bbox.width/2)+','+
+	      (bbox.y + bbox.height/2)+') scale('+scale+')');
+    return containerGroup;
+}
+
+function linkableFittedText(group, data, bbox, cb) {
+    var group = fittedText(group, ""+data, bbox, cb);
+    attachDataHandlers(group, cb, data);
+    return group;
+}
+
+function attachDataHandlers(elem, cb, data) {
+    function handleCb(dx, dy, handle) {
+	var max = 40;
+	elem.attr('transform', 'translate(0,'+dy+')');
+	elem.attr('fill-opacity', 1.0 - Math.abs(dy)/max);
+	if (dy < -max) {
+	    cb.origin(data);
+	}
+    }
+    makeDragHandle(null, null, null, null, handleCb, function(){}, elem);
     return elem;
-}
-
-function bbox(d3elem) {
-    return d3elem.node().getBBox();
-}
-
-function TraceableData(data, savedExecution) {
-    this.data = data;
-    this.saved = savedExecution;
 }
 
 var _ELLIPSIS = new Object();
@@ -178,7 +187,7 @@ function layoutListData(container, wfData, bbox, cb) {
 	    layoutData(group, item, newBox, cb);
 	    if (divider) {
 		divider.attr('stroke','#600');
-		divider.node().addEventListener('click', function() { return cb.origin(wfData); });
+		attachDataHandlers(divider, cb, wfData);
 	    }
 	});
     }
@@ -200,12 +209,12 @@ function layoutListData(container, wfData, bbox, cb) {
 }
 function layoutFunctionData(container, data, bbox, cb) {
     var group = fittedText(container, '<func>', bbox);
-    group.node().addEventListener('click', function() { return cb.origin(data); });
+    attachDataHandlers(group, cb, data);
     return group;
 }
 function layoutError(container, data, bbox, cb) {
     var group = fittedText(container, '<err>', bbox);
-    group.node().addEventListener('click', function() { return cb.origin(data); });
+    attachDataHandlers(group, cb, data);
     return group;
 }
 var _DATA_LAYOUTS = {
@@ -220,7 +229,7 @@ var _DATA_LAYOUTS = {
 function layoutData(container, data, bbox, cb) {
     if (data === _ELLIPSIS) {
 	var group = fittedText(container, '...', bbox);
-	group.node().addEventListener('click', function() { return cb.origin(data); });
+	attachDataHandlers(group, cb, data);
 	return group;
     } else {
 	var typ = wf.typeOf(data);
@@ -670,7 +679,7 @@ function makeDragHandle(group, x, y, handleRadius, dragCb, tapCb, userSuppliedHa
     var sy=null;
     var cx=null;
     var cy=null;
-    var touchable = handle[0][0];
+    var touchable = handle.node();
     var touchId=null;
     function scroll() {
 	if (sx === null) {
@@ -731,8 +740,12 @@ function makeViewer(group, centerx, centery, transformCb){
     var scrollx = -10;//bbox.x + bbox.width / 2;
     var scrolly = -100;//bbox.y + bbox.height / 2;
     var zoom = 1.0;
-    function render() {
+    var animationTarget = null;
+    function translate() {
 	group.attr('transform', 'translate('+centerx+','+centery+') scale('+zoom+') translate('+scrollx+','+scrolly+')');
+    }
+    function render() {
+	translate();
 	transformCb();
     }
     function trans(x,y) {
@@ -740,10 +753,28 @@ function makeViewer(group, centerx, centery, transformCb){
 	scrolly += y / zoom;
 	render();
     }
-    function centerOnCursor(centerCursor) {
+    function checkCursorAnimation() {
+	if (animationTarget.tm <= 0) {
+	    scrollx = animationTarget.x;
+	    scrolly = animationTarget.y;
+	    render();
+	    if (animationTarget.cb) animationTarget.cb();
+	    animationTarget = null;
+	} else {
+	    scrollx = (scrollx + animationTarget.x) / 2;
+	    scrolly = (scrolly + animationTarget.y) / 2;
+	    translate();
+	    animationTarget.tm -= 20;
+	    setTimeout(checkCursorAnimation, 20);
+	}
+    }
+    function centerOnCursor(centerCursor, cbWhenCentered, doImmediate) {
 	var area = centerCursor.node.getBoundingClientRect();
-	trans(centerx - (area.right + area.left) / 2, centery - (area.bottom + area.top) / 2);
-	render();
+	var x = centerx - (area.right + area.left) / 2;
+	var y = centery - (area.bottom + area.top) / 2;
+	var tm = (doImmediate) ? 0 : 100;
+	animationTarget = {x: scrollx + x / zoom, y: scrolly + y / zoom, tm:tm, cb:cbWhenCentered};
+	checkCursorAnimation();
     }
     return {
 	translate: trans,
@@ -776,7 +807,7 @@ function makeViewer(group, centerx, centery, transformCb){
 	    group = newGroup;
 	    render();
 	    if (centerCursor) {
-		centerOnCursor(centerCursor);
+		centerOnCursor(centerCursor, null, true);
 	    }
 	}
     }
@@ -1747,14 +1778,13 @@ function setupExplorer() { // thing at the bottom that shows data structures
 		console.log('ORIGIN', origin, ' from data ', data);
 		var newCursor = runState.viewer.findCursorForOp(origin);
 		if (newCursor) {
-		    runState.viewer.centerOnCursor(newCursor);
-		    showExecutionData();
+		    runState.viewer.centerOnCursor(newCursor, showExecutionData);
 		} else {
 		    console.log('Unable to find cursor for origin: ', origin);
 		}
 	    };
-	    var stackData = wf.stackToWfList(thisPair[0][1]).reverse(); // top item on right
-	    layoutData(container, stackData, dims, {origin: originCb});
+	    var stackData = wf.stackToWfList(thisPair[0][1]).slice(0, opRec._wft_numConsumed);
+	    layoutData(container, stackData.reverse(), dims, {origin: originCb});
 	}
     }
     function clearDisplay() {
