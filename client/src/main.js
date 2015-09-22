@@ -82,8 +82,8 @@ function genSvg(width, height) {
 	    .append('svg:svg')
 	    .attr('viewBox', '0 0 '+width+' '+height)
     };
-    svgState.topSplit = height / 2 - 50;
-    svgState.bottomSplit = svgState.topSplit + 150;
+    svgState.topSplit = height / 2 - 40;
+    svgState.bottomSplit = svgState.topSplit + 140;
     return svgState;
 }
 
@@ -126,11 +126,9 @@ function linkableFittedText(group, data, bbox, cb) {
 }
 
 function fittedText(group, text, bbox, cb) {
-    console.log('fitted text ', text, bbox);
     var elem = group.append('svg:text').attr('x',0).attr('y',0).attr('font-family','Verdana').attr('font-size',10);
     elem.attr('alignment-baseline', 'text-before-edge').text(text);
     var startBox = elem.node().getBBox();
-    console.log(startBox, bbox);
     var scaleWidth = bbox.width / startBox.width;
     var scaleHeight = bbox.height / startBox.height;
     elem.attr('transform', 'translate('+bbox.x+','+bbox.y+') scale('+Math.min(scaleWidth, scaleHeight)+')');
@@ -400,10 +398,8 @@ var baseVisuals = {
 	    var strand = blockToStrand(branch); 
 	    maxConsumed = Math.max(maxConsumed, strand.numConsumed);
 	    maxProduced = Math.max(maxProduced, strand.numProduced);
-	    console.log('cond ', maxConsumed, maxProduced, strand);
 	    return strand;
 	});
-	console.log('cond analysis ', maxConsumed, maxProduced, branches);
 	if (branches.length > 0) {
 	    branches[branches.length - 1].tailOfConditional = op;
 	}
@@ -467,12 +463,11 @@ function cleanModule(module) {
     function strip(node, path) {
 	Object.keys(node).forEach(function(key) {
 	    if (key.length > 0 && key[0] === '_') {
-		console.log('deleting key ', key, '@ ', path);
 		delete node[key];
 	    }
 	});
     }
-    wf.wfVisitModule(module, {fn:strip, block:strip, op:strip});
+    wf.visitModule(module, {fn:strip, block:strip, op:strip});
 }
 
 function saveModule(url, module, okCb, errCb) {
@@ -764,7 +759,6 @@ function makeViewer(group, centerx, centery, transformCb){
 		    if (codeOp === cursor.opident) resultFnId = curFnId;
 		}
 	    });
-	    console.log('fn for cursor: ', resultFnId);
 	    return resultFnId;
 	},
 	findCursorForOp: function(opRec) {
@@ -903,7 +897,8 @@ function buttonArc(container, x, y, radius, startAngle, items) {
 	}
 	
 
-	var txtSize = (item.label.length == 1) ? 24 : 16;
+	var txtSize = 16;
+	if (item.label && item.label.length === 1) txtSize = 24;
 	var txt = svgText(button, x, y - radius, item.label, txtSize);
 
 	var tapCb = function(){};
@@ -1092,12 +1087,9 @@ setupInput(searchBox, function() {
 	    resultList.appendChild(li);
 	    li.onclick = function() {
 		var url = ideState.repoRoot+'/'+hit.id;
-		console.log('url0', url);
 		loadModule(url, env, function() {
-		    console.log('url1', url);
 		    var module = runState.codeEnv.modules[url];
 		    openModuleDialog.close();
-		    console.log('url2', url);
 		    var options = {
 			edit: function() {
 			    ideState.moduleUrls.splice(0, 0, url);
@@ -1127,14 +1119,12 @@ setupInput(searchBox, function() {
 			    });
 			},
 			include: function() {
-			    console.log('url3', url);
 			    var refs = runState.curModule().refs;
 			    if (typeof url !== 'string') throw new Error('eh? '+url);
 			    refs.push({url: url});
 			    runState.controls.regenModuleButtons();
 			}
 		    };
-		    console.log('opening action');
 		    options[openAction]();
 		    openAction = null;
 		}, function(err) {
@@ -1304,7 +1294,8 @@ function cursorIsAtTail() {
     return (cursor.opident === cursor.opcontainer);
 }
 
-function insertAtCursor(codeItem) {
+function insertAtCursor(codeItem, dontadvance) {
+    var oldIdx = runState.rootLayout.cursors.indexOf(cursor);
     if (cursorIsAtTail()) {
 	cursor.opcontainer.push(codeItem);
     } else {
@@ -1312,6 +1303,9 @@ function insertAtCursor(codeItem) {
 	cursor.opcontainer.splice(idx, 0, codeItem);
     }
     layoutCode();
+    if (dontadvance) {
+	runState.viewer.centerOnCursor(runState.rootLayout.cursors[oldIdx]);
+    }
 }
 
 function setupInput(input, cb) {
@@ -1391,7 +1385,7 @@ function newCond() {
 	branches: [
 	    {condition: conditionCode, code: []}
 	]
-    });
+    }, true);
     cursor = {opident: conditionCode, opcontainer: conditionCode, optype:'function'};
 
 
@@ -1402,8 +1396,9 @@ function newLambda() {
     insertAtCursor({
 	op: 'lambda',
 	code: []
-    });
+    }, true);
     runState.controls.setMode('op');
+    
 }
 
 function newCallLambda() {
@@ -1647,7 +1642,8 @@ compunds:
 
 
 // TODO I think startModuleUrl and startFnId may always be equal to what's at the top of callStack, might remove
-function findOriginOfValue(value, executor, savedTrace, startStack, callStack) {
+function findOriginOfValue(value, executor, savedTrace, callStack) {
+    var startStack = callStack[callStack.length - 1].stack;
     var optraceData = [];
     var stackitem = callStack[callStack.length - 1];
     var startModuleUrl = stackitem.moduleUrl;
@@ -1669,7 +1665,7 @@ function findOriginOfValue(value, executor, savedTrace, startStack, callStack) {
 	    console.log('found fn call resolved:', resolved);
 	    console.log('found fn call inputs as rememebered:', wf.stackToWfList(opInputs).toJS());
 	    callStack.push({moduleUrl:resolved[0], fnId:resolved[1], stack:opInputs, opRec:opRec});
-	    return findOriginOfValue(value, executor, savedTrace, opInputs, callStack);
+	    return findOriginOfValue(value, executor, savedTrace, callStack);
 	} else {
 	    return opRec;
 	}
@@ -1682,8 +1678,10 @@ function findOriginOfValue(value, executor, savedTrace, startStack, callStack) {
 	var path = wf.findValueIn(value, wf.stackToWfList(stack));
 	console.log('find origin itr ', opRec.op, ' foundpath: ',path);
 	if (path === undefined) continue;
-	if (i === 0) { // since the beginning, just give the start op
-	    return opRec;
+	if (i === 0) { 
+	    callStack.pop();
+	    return findOriginOfValue(value, executor, savedTrace, callStack);
+    	    //return opRec; // since the beginning, just give the start op?
 	} else { // the previous op would be the one that added the value
 	    return descendInto(i - 1);
 	}
@@ -1742,11 +1740,10 @@ function setupExplorer() { // thing at the bottom that shows data structures
 	executor(moduleUrl, fnId, stackitem.stack, tracer);
 	var thisPair = optraceData.filter(function(pair) { return pair[0] === opRec; });
 	// TODO this can produce multiple hits for a lambda
-	console.log('lookup zzz ', opRec, ' in ', optraceData, ' produced ', thisPair, ' callstack stack ', stackitem.stack);
 	clearDisplay();
 	if (thisPair.length > 0) {
 	    var originCb = function(data) {
-		var origin = findOriginOfValue(data, executor, trace, stackitem.stack, callStack);
+		var origin = findOriginOfValue(data, executor, trace, callStack);
 		console.log('ORIGIN', origin, ' from data ', data);
 		var newCursor = runState.viewer.findCursorForOp(origin);
 		if (newCursor) {
@@ -1768,7 +1765,6 @@ function setupExplorer() { // thing at the bottom that shows data structures
 	    testResults = r;
 	},
 	updateDisplay: function() {
-	    console.log('lookup zzz {{{{');
 	    console.log('explorer: updateDisplay() callstack:', callStack);
 	    var curFnId = runState.viewer.findCursorsContainingFn();
 	    if (curFnId) {
@@ -1781,7 +1777,6 @@ function setupExplorer() { // thing at the bottom that shows data structures
 	    } else {
 		clearDisplay();
 	    }
-	    console.log('lookup zzz }}}}');
 	},
 	showTestData: showTestData,
     };
@@ -1790,8 +1785,8 @@ function setupExplorer() { // thing at the bottom that shows data structures
 
 
 function setupControls() {
-    var yCentroid = s.bottomSplit + 50;
-    var fnMenu1 = buttonArc(s.elem,  s.r(0), yCentroid, 143, -130, [//-68, [
+    var yCentroid = s.bottomSplit + 70;
+    var fnMenu1 = buttonArc(s.elem,  s.r(0), yCentroid, 163, -65, [//-68, [
 	{label:'infc', exec:newInterface},
 	{label:'new', exec:newFunction},
 	{label:'asrt', exec:newAssert},
@@ -1801,28 +1796,29 @@ function setupControls() {
 	{label:'ntv', exec:editNative},
     ]);
 
-    var opMenu0 = buttonArc(s.elem, s.r(0), yCentroid, 77, -55, [
+    var opMenu0 = buttonArc(s.elem, s.r(0), yCentroid, 97, -45, [
 	{label:'c/c', exec:cutOrCopy},
 	{label:'undo', exec:undoOrRedo}
     ]);
     
-    var opMenu1 = buttonArc(s.elem,  s.r(0), yCentroid, 135, -70, [//-68, [
-	//{label:'kil', exec:callAdder('0:k')},
+    var opMenu1 = buttonArc(s.elem,  s.r(0), yCentroid, 155, -63, [//-68, [
 	{label:'sav', exec:saveVar},
 	{label:'lod', exec:loadVar},
-	{label:'rse'},
-	{label:'drp'},
-	//{label:'swp', exec:callAdder('0:s')},
-	//{label:'dup', exec:callAdder('0:d')},
+	//{label:'rse'},
+	//{label:'drp'},
     ].concat(buttonsForModule(moduleForRef(0), 0, 'navigation')));
     
-    var opMenu2 = buttonArc(s.elem,  s.r(0), yCentroid, 158, -72, [
+    var opMenu2 = buttonArc(s.elem,  s.r(0), yCentroid, 178, -68, [
 	{label:'bln', exec:moduleMenu(0, 'boolean', [{label:'cond', exec:newCond}])},
 	{label:'prd', exec:moduleMenu(0, 'predicate')},
-	{label:'mth', exec:moduleMenu(0, 'math')},
-	{label:'new', exec:moduleMenu(0, 'constructor', [
-	    {label:'"..', exec:newString}, 
+	{label:'mth', exec:moduleMenu(0, 'math', [
+	    {label:'0', exec:literalAdder(0)},
+	    //{label:'1', exec:literalAdder(1)},
 	    {label:'#..', exec:newNumber},
+	])},
+	{label:'new', exec:moduleMenu(0, 'constructor', [
+	    {label:'""', exec:literalAdder("")},
+	    {label:'".."', exec:newString}, 
 	    {label:'null', exec:literalAdder(null)},
 	    {label:'true', exec:literalAdder(true)},
 	    {label:'false', exec:literalAdder(false)},
@@ -1834,7 +1830,7 @@ function setupControls() {
     ]);
 
     function moduleMenuButtonArc(){
-	return buttonArc(s.elem, s.r(0), yCentroid, 180, -72, genModuleMenuButtons());
+	return buttonArc(s.elem, s.r(0), yCentroid, 200, -70, genModuleMenuButtons());
     }
     
     function genModuleMenuButtons() {
@@ -1857,8 +1853,8 @@ function setupControls() {
 	return buttons;
     }
 
-    var dPad = makeDpad(s.elem, runState.viewer, s.l(75), s.bottomSplit - 75, 73, 30);
-    var zPad = makeZoomPad(s.elem, runState.viewer, s.r(0), s.bottomSplit + 50, 110, 14, 297, 359);
+    var dPad = makeDpad(s.elem, runState.viewer, s.l(70), s.bottomSplit - 70, 68, 30);
+    var zPad = makeZoomPad(s.elem, runState.viewer, s.r(0), s.bottomSplit + 70, 130, 14, 303, 359);
     var modeElements = {
 	'op': [dPad, opMenu1, opMenu2, moduleMenuButtonArc()],
 	'function': [dPad, fnMenu1],
@@ -1913,14 +1909,12 @@ function setupControls() {
 	}
     }
     function buttonsForModule(module, moduleIndex, tag) {
-	console.log('buttons for module ', moduleIndex, tag, module);
 	if (! module) return [];
 	var functions = module.functions;
 	var fids = Object.keys(functions);
 	if (tag) {
 	    fids = fids.filter(function(fid){return functions[fid].tags.indexOf(tag) != -1;});
 	}
-	console.log('buttons for module fids ', fids);
 	return fids.map(function(fid) {
 	    var cb = (moduleIndex === -1) ? callAdder(fid) : callAdder(moduleIndex+':'+fid);
 	    return {label:functions[fid].name, exec:cb};
@@ -1938,7 +1932,7 @@ function setupControls() {
 	    if (extras) {
 		buttons = extras.concat(buttons);
 	    }
-	    var menu = buttonArc(s.elem,  s.l(0), s.bottomSplit+50, 170, 0, buttons);
+	    var menu = buttonArc(s.elem,  s.l(0), s.bottomSplit+100, 220, 0, buttons);
 	    var cancelButton = svgText(s.elem, s.l(5), s.bottomSplit - 5, '\u27A1', 16);
 	    cancelButton.node().addEventListener('click', function() { setMode('op'); });
 	    setMode('module', [menu, cancelButton]);
