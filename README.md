@@ -1,8 +1,8 @@
 # wildflower-touch
 
-A [Wildflower](https://github.com/pschanely/wildflower) IDE for touch devices.
+A [Wildflower](https://github.com/pschanely/wildflower) IDE for touch devices.  Point-free style has an advantage on mobile because you don't have to name many things (but I can't really handle much of that, so it's got variables too).  It's pure functional, but I stubbornly refuse to make analogies with concepts in graduate level mathematics.
 
-This is a hack.  It really doesn't work yet.  Don't try to use it.  That said, if you're interested in this sort of thing, I'd love to hear from you.
+This is a hack.  A concept.  It really doesn't work yet.  That said, if you're interested in this sort of thing, want to give me feedback, or would like to help evolve it, I'd love to hear from you.
 
 Here's a demo of me implementing the solution to [problem one](https://projecteuler.net/problem=1) of Project Euler (finding the multiples of 3 and 5 up to some limit and taking their sum):
 
