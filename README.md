@@ -12,3 +12,16 @@ Pure functional languages let us do some pretty great things in the IDE.  More p
 
 ![Data path tracing in wildflower-touch](https://raw.githubusercontent.com/pschanely/wildflower-touch/master/datapath.gif)
 
+## Install
+
+This thing really isn't ready for anyone to use it, but if you'd like to build it anyway, you should be able to do this:
+
+```
+$ npm install --global gulp cordova # (if you don't already have these)
+$ cd client
+$ npm install
+$ gulp app
+$ cd ../mobile
+$ cordova platform add android # (or ios!)
+$ cordova run android # (or ios!)
+```
