@@ -12,7 +12,10 @@ function buildto(dir, isweb) {
 	html = gulp.src(['./src/*.html', './src/*.css']);
     }
     html.pipe(gulp.dest(dir));
-
+    
+    gulp.src('node_modules/dialog-polyfill/dialog-polyfill.js').pipe(gulp.dest(dir))
+    gulp.src('node_modules/dialog-polyfill/dialog-polyfill.css').pipe(gulp.dest(dir))
+    
     gulp.src('./src/main.js')
         .pipe(browserify({
           insertGlobals : true,

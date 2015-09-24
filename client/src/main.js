@@ -23,6 +23,12 @@ var wf = require('wf-jsinterp');
 var d3 = require('d3-browserify');
 var sha256 = require('fast-sha256');
 
+// required for HTML dialog polyfill:
+var dialogs = document.querySelectorAll('dialog');
+for (var i = 0; i < dialogs.length; ++i) {
+    dialogPolyfill.registerDialog(dialogs[i]);
+}
+
 function polarToCartesian(centerX, centerY, radius, angleInDegrees) {
     var angleInRadians = (angleInDegrees-90) * Math.PI / 180.0;
     return {
@@ -266,7 +272,7 @@ function layoutModule() {
     var container = codeRoot;
     var group = container.append('svg:g');
     var cursors = [];
-    if (runState.ideState.moduleUrls.length === 0) {
+    if (! runState.curModule()) {
 	return {group:group, cursors:cursors};
     }
     var env = runState.codeEnv;
@@ -894,7 +900,10 @@ var runState = {
     viewer: null,
     codeEnv: env,
     execution: setupExecutionContext(onTestsComplete),
-    curModule: function() { return env.modules[ideState.moduleUrls[0]]; },
+    curModule: function() {
+	var urls = ideState.moduleUrls;
+	return (urls.length == 0) ? null : env.modules[urls[0]];
+    },
     module: function(idx) { return env.modules[ideState.moduleUrls[idx]]; }
 }
 
@@ -1208,7 +1217,7 @@ document.getElementById('mainMenuNext').onclick = function() {
 document.getElementById('openModuleDialogCancel').onclick = function() {
     openModuleDialog.close();
 };
-var menuButton = svgText(s.elem, 5, 22, "\u2630", 24);
+var menuButton = svgText(s.elem, 5, 22, "\u2261", 24);
 menuButton.node().onclick = function() { mainMenuDialog.showModal(); };
 
 
@@ -1795,6 +1804,7 @@ function setupExplorer() { // thing at the bottom that shows data structures
 	    testResults = r;
 	},
 	updateDisplay: function() {
+	    if (! runState.curModule()) return null;
 	    console.log('explorer: updateDisplay() callstack:', callStack);
 	    var curFnId = runState.viewer.findCursorsContainingFn();
 	    if (curFnId) {

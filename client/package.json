@@ -17,14 +17,15 @@
   },
   "homepage": "https://github.com/pschanely/wildflower-touch",
   "devDependencies": {
+    "d3-browserify": "~3.4.12",
     "gulp": "^3.8.11",
     "gulp-browserify": "^0.5.1",
     "gulp-inline-source": "^1.2.0",
     "gulp-print": "^1.1.0",
-    "wf-jsinterp": "^0.0.0",
-    "d3-browserify": "~3.4.12"
+    "wf-jsinterp": "^0.0.0"
   },
   "dependencies": {
+    "dialog-polyfill": "^0.4.1",
     "fast-sha256": "^0.9.2"
   }
 }
